@@ -1,4 +1,5 @@
 import random
+import copy
 from datetime import datetime, date
 import streamlit as st
 import pandas as pd
@@ -15,15 +16,19 @@ DEMO_NAMES = [
 STRATEGIES = {
     "안정형": {
         "max_position": 150000, "max_positions": 3, "cash_reserve": 50000,
-        "daily_loss_limit": 10000, "buy_threshold": 80,
+        "daily_loss_limit": 10000, "buy_threshold": 70,
         "stop_loss_pct": 1.0, "trailing_activation_pct": 1.0,
         "trailing_gap_pct": 1.0, "risk_budget_pct": 0.5,
+        "min_trend": -0.2, "min_momentum": -0.2, "min_volume_ratio": 0.9,
+        "max_risk": 0.8, "max_change_pct": 4.0,
     },
     "공격형": {
         "max_position": 180000, "max_positions": 3, "cash_reserve": 20000,
-        "daily_loss_limit": 15000, "buy_threshold": 75,
+        "daily_loss_limit": 15000, "buy_threshold": 60,
         "stop_loss_pct": 1.5, "trailing_activation_pct": 2.0,
         "trailing_gap_pct": 1.0, "risk_budget_pct": 0.75,
+        "min_trend": -0.5, "min_momentum": -0.5, "min_volume_ratio": 0.8,
+        "max_risk": 0.9, "max_change_pct": 5.0,
     },
 }
 
@@ -54,6 +59,8 @@ def initialize_state():
         st.session_state.market = market
     if "portfolios" not in st.session_state:
         st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
+    if "strategy_settings" not in st.session_state:
+        st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
     if "tick" not in st.session_state:
         st.session_state.tick = 0
     if "auto_trade" not in st.session_state:
@@ -100,6 +107,7 @@ def score_universe():
             "현재가": round(q["price"], 0), "등락률(%)": round(change, 2),
             "거래량비율": round(q["volume_ratio"], 2), "AI점수": score,
             "품질조건": not gates, "매매검증": "조건 충족" if not gates else ", ".join(gates),
+            "추세값": q["trend"], "모멘텀값": q["momentum"], "위험도": q["risk"],
         })
     return pd.DataFrame(rows).sort_values(["AI점수", "거래량비율"], ascending=False).reset_index(drop=True)
 
@@ -129,7 +137,7 @@ def _record(pf, side, q, qty, price, reason):
     })
 
 def run_strategy(name, scored):
-    cfg = STRATEGIES[name]
+    cfg = st.session_state.strategy_settings[name]
     pf = st.session_state.portfolios[name]
     if pf["daily_halted"]:
         return
@@ -167,7 +175,13 @@ def run_strategy(name, scored):
 
     for _, row in scored.iterrows():
         code = row["code"]
-        if float(row["AI점수"]) < cfg["buy_threshold"] or not row["품질조건"]:
+        if float(row["AI점수"]) < cfg["buy_threshold"]:
+            continue
+        if (float(row["추세값"]) < cfg["min_trend"] or
+            float(row["모멘텀값"]) < cfg["min_momentum"] or
+            float(row["거래량비율"]) < cfg["min_volume_ratio"] or
+            float(row["위험도"]) > cfg["max_risk"] or
+            float(row["등락률(%)"]) > cfg["max_change_pct"]):
             continue
         if code in pf["positions"] or len(pf["positions"]) >= cfg["max_positions"]:
             continue
