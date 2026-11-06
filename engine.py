@@ -70,12 +70,30 @@ def score_universe():
         risk_score = max(0, min(10, 10 - q["risk"] * 10))
         score = round(trend_score + momentum_score + volume_score + risk_score, 1)
         change = (q["price"] / q["prev"] - 1) * 100
-        decision = "매수 후보" if score >= st.session_state.buy_threshold else ("관찰" if score >= 70 else "제외")
+        # A high score alone is not enough to trigger a trade.
+        # These thresholds are provisional and must be calibrated on real historical data.
+        gates = []
+        if q["trend"] <= 0:
+            gates.append("상승 추세 미확인")
+        if q["momentum"] <= 0:
+            gates.append("모멘텀 미확인")
+        if q["volume_ratio"] < 1.1:
+            gates.append("거래량 확인 부족")
+        if q["risk"] > 0.70:
+            gates.append("위험도 높음")
+        if change > 3.0:
+            gates.append("급등 추격매수 제한")
+        quality_pass = not gates
+        decision = (
+            "매수 후보" if score >= st.session_state.buy_threshold and quality_pass
+            else ("관찰" if score >= 70 else "제외")
+        )
+        reason = "조건 충족" if quality_pass else ", ".join(gates)
         rows.append({
             "code": q["code"], "종목명": q["name"], "시장": q["market"],
             "현재가": round(q["price"], 0), "등락률(%)": round(change, 2),
             "거래량비율": round(q["volume_ratio"], 2),
-            "AI점수": score, "판정": decision
+            "AI점수": score, "판정": decision, "매매검증": reason
         })
     return pd.DataFrame(rows).sort_values(["AI점수", "거래량비율"], ascending=False).reset_index(drop=True)
 
@@ -138,9 +156,19 @@ def run_strategy(scored):
         if st.session_state.tick - st.session_state.last_buy_tick.get(code, -999) < 12:
             continue
         q = st.session_state.market[code]
-        invest = min(float(st.session_state.max_position), st.session_state.cash - 50000)
+        # Planned stop-loss risk is capped at 0.5% of current equity.
+        equity = portfolio_snapshot()["equity"]
+        risk_budget = equity * 0.005
+        stop_fraction = max(float(st.session_state.stop_loss_pct) / 100, 0.002)
+        risk_limited_shares = int(risk_budget / (q["price"] * stop_fraction))
+        risk_limited_amount = risk_limited_shares * q["price"]
+        invest = min(
+            float(st.session_state.max_position),
+            float(st.session_state.cash - 50000),
+            float(risk_limited_amount),
+        )
         if invest < 10000:
-            break
+            continue
         qty = int(invest // q["price"])
         if qty <= 0:
             continue
@@ -148,7 +176,7 @@ def run_strategy(scored):
         st.session_state.cash -= cost
         st.session_state.positions[code] = {"qty": qty, "avg_price": q["price"]}
         st.session_state.last_buy_tick[code] = st.session_state.tick
-        _record("매수", q, qty, q["price"], f"AI 점수 {score}점")
+        _record("매수", q, qty, q["price"], f"AI 점수 {score}점 · 손실예산 0.5% · 추가매수 금지")
 
 def portfolio_snapshot():
     market_value = sum(pos["qty"] * st.session_state.market[code]["price"]
