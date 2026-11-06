@@ -7,6 +7,36 @@ from engine import (
 )
 
 st.set_page_config(page_title="AI 모의매매", page_icon="📈", layout="wide")
+
+# Application-level access gate. Configure SITE_USERNAME and SITE_PASSWORD
+# as Render environment variables. Fail closed when either is missing.
+import os
+import hmac
+
+site_username = os.getenv("SITE_USERNAME", "")
+site_password = os.getenv("SITE_PASSWORD", "")
+
+if not site_username or not site_password:
+    st.error("사이트 접근 설정이 완료되지 않았습니다. 관리자에게 문의하세요.")
+    st.stop()
+
+if not st.session_state.get("site_authenticated", False):
+    st.title("🔒 비공개 모의매매 사이트")
+    st.caption("접근 권한이 있는 사용자만 이용할 수 있습니다.")
+    with st.form("site_login"):
+        entered_username = st.text_input("아이디")
+        entered_password = st.text_input("비밀번호", type="password")
+        submitted = st.form_submit_button("로그인", use_container_width=True)
+    if submitted:
+        user_ok = hmac.compare_digest(entered_username, site_username)
+        pass_ok = hmac.compare_digest(entered_password, site_password)
+        if user_ok and pass_ok:
+            st.session_state.site_authenticated = True
+            st.rerun()
+        else:
+            st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+    st.stop()
+
 initialize_state()
 
 st.title("📈 AI 장중 모의매매")
