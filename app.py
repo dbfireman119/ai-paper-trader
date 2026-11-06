@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from app.engine import (
+from engine import (
     initialize_state, advance_market, score_universe, run_strategy,
     portfolio_snapshot, reset_session
 )
