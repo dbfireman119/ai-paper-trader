@@ -60,6 +60,24 @@ with st.sidebar:
     st.divider()
     st.toggle("자동 모의매매 실행", key="auto_trade")
     st.caption("자동 실행을 켜면 새 가상 시세가 생성될 때 매수·매도 규칙을 시험합니다.")
+    st.divider()
+    st.subheader("나무증권 API")
+    st.caption("NH투자증권 Namuh PLUG · 실제 주문 기능은 사용하지 않습니다.")
+    if st.button("나무증권 API 연결 테스트 (삼성전자)", use_container_width=True):
+        try:
+            from nh_api import get_current_price
+            st.session_state["nh_api_test_result"] = get_current_price("005930")
+            st.session_state["nh_api_test_error"] = None
+        except Exception as exc:
+            st.session_state["nh_api_test_error"] = str(exc)
+            st.session_state["nh_api_test_result"] = None
+    if st.session_state.get("nh_api_test_result"):
+        result = st.session_state["nh_api_test_result"]
+        st.success(f"API 응답 확인: {result['name']} {result['price']:,}원")
+    elif st.session_state.get("nh_api_test_error"):
+        st.error(f"API 연결 실패: {st.session_state['nh_api_test_error']}")
+    else:
+        st.info("키 미등록 상태에서는 기존 가상 시세로 계속 실행됩니다.")
     if st.button("모의계좌 초기화", use_container_width=True):
         reset_session()
         st.rerun()
