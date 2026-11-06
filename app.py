@@ -64,7 +64,7 @@ with st.sidebar:
         st.rerun()
 
 def show_strategy(name):
-    cfg = STRATEGIES[name]
+    cfg = st.session_state.strategy_settings[name]
     pf = st.session_state.portfolios[name]
     snap = portfolio_snapshot(name)
     a, b, c, d = st.columns(4)
@@ -86,6 +86,27 @@ def show_strategy(name):
         f"고점 대비 -{cfg['trailing_gap_pct']}% · 거래 위험예산 {cfg['risk_budget_pct']}% · "
         f"일일 손실한도 {cfg['daily_loss_limit']:,}원"
     )
+    with st.expander(f"{name} 세부 설정 조절", expanded=False):
+        st.caption("이 설정은 현재 로그인 세션의 해당 전략에만 적용됩니다. 두 탭은 서로 독립적으로 조절할 수 있습니다.")
+        x1, x2, x3 = st.columns(3)
+        cfg["buy_threshold"] = x1.slider("매수 최소 점수", 40, 95, int(cfg["buy_threshold"]), key=f"{name}_threshold")
+        cfg["max_positions"] = x2.slider("최대 보유 종목 수", 1, 8, int(cfg["max_positions"]), key=f"{name}_max_positions")
+        cfg["max_position"] = x3.number_input("종목당 최대 투자금(원)", 10000, 500000, int(cfg["max_position"]), 10000, key=f"{name}_max_position")
+        x1, x2, x3 = st.columns(3)
+        cfg["min_trend"] = x1.slider("최소 추세값", -2.0, 2.0, float(cfg["min_trend"]), 0.1, key=f"{name}_min_trend")
+        cfg["min_momentum"] = x2.slider("최소 모멘텀값", -2.0, 2.0, float(cfg["min_momentum"]), 0.1, key=f"{name}_min_momentum")
+        cfg["min_volume_ratio"] = x3.slider("최소 거래량 비율", 0.5, 3.0, float(cfg["min_volume_ratio"]), 0.1, key=f"{name}_min_volume")
+        x1, x2, x3 = st.columns(3)
+        cfg["max_risk"] = x1.slider("허용 최대 위험도", 0.1, 1.0, float(cfg["max_risk"]), 0.05, key=f"{name}_max_risk")
+        cfg["max_change_pct"] = x2.slider("급등 제한 등락률(%)", 1.0, 10.0, float(cfg["max_change_pct"]), 0.5, key=f"{name}_max_change")
+        cfg["cash_reserve"] = x3.number_input("현금 유보액(원)", 0, 300000, int(cfg["cash_reserve"]), 10000, key=f"{name}_reserve")
+        x1, x2, x3 = st.columns(3)
+        cfg["stop_loss_pct"] = x1.slider("손절 기준(%)", 0.5, 5.0, float(cfg["stop_loss_pct"]), 0.1, key=f"{name}_stop")
+        cfg["trailing_activation_pct"] = x2.slider("트레일링 시작 수익률(%)", 0.5, 8.0, float(cfg["trailing_activation_pct"]), 0.1, key=f"{name}_trail_start")
+        cfg["trailing_gap_pct"] = x3.slider("고점 대비 매도 하락률(%)", 0.5, 5.0, float(cfg["trailing_gap_pct"]), 0.1, key=f"{name}_trail_gap")
+        x1, x2 = st.columns(2)
+        cfg["risk_budget_pct"] = x1.slider("1회 거래 위험예산(%)", 0.1, 2.0, float(cfg["risk_budget_pct"]), 0.05, key=f"{name}_risk_budget")
+        cfg["daily_loss_limit"] = x2.number_input("일일 손실 제한(원)", 1000, 100000, int(cfg["daily_loss_limit"]), 1000, key=f"{name}_daily_loss")
     left, right = st.columns([1.15, 1])
     with left:
         st.subheader("보유 종목")
@@ -110,10 +131,20 @@ def show_strategy(name):
             st.write("아직 체결 내역이 없습니다.")
     st.subheader("이 전략의 매수 후보")
     candidates = scored.copy()
-    candidates["판정"] = candidates.apply(
-        lambda r: "매수 후보" if r["AI점수"] >= cfg["buy_threshold"] and r["품질조건"]
-        else ("관찰" if r["AI점수"] >= 70 else "제외"), axis=1
-    )
+    def judge(r):
+        filters_ok = (
+            r["추세값"] >= cfg["min_trend"] and
+            r["모멘텀값"] >= cfg["min_momentum"] and
+            r["거래량비율"] >= cfg["min_volume_ratio"] and
+            r["위험도"] <= cfg["max_risk"] and
+            r["등락률(%)"] <= cfg["max_change_pct"]
+        )
+        if r["AI점수"] >= cfg["buy_threshold"] and filters_ok:
+            return "매수 후보"
+        if r["AI점수"] >= max(40, cfg["buy_threshold"] - 10):
+            return "관찰"
+        return "제외"
+    candidates["판정"] = candidates.apply(judge, axis=1)
     st.dataframe(
         candidates[["종목명", "시장", "현재가", "등락률(%)", "거래량비율", "AI점수", "판정", "매매검증"]].head(10),
         use_container_width=True, hide_index=True
