@@ -145,6 +145,16 @@ def show_strategy(name):
             return "관찰"
         return "제외"
     candidates["판정"] = candidates.apply(judge, axis=1)
+    def validation(r):
+        reasons = []
+        if r["추세값"] < cfg["min_trend"]: reasons.append("추세 기준 미달")
+        if r["모멘텀값"] < cfg["min_momentum"]: reasons.append("모멘텀 기준 미달")
+        if r["거래량비율"] < cfg["min_volume_ratio"]: reasons.append("거래량 기준 미달")
+        if r["위험도"] > cfg["max_risk"]: reasons.append("위험도 초과")
+        if r["등락률(%)"] > cfg["max_change_pct"]: reasons.append("급등 제한")
+        if r["AI점수"] < cfg["buy_threshold"]: reasons.append("매수 점수 미달")
+        return "전략 조건 충족" if not reasons else ", ".join(reasons)
+    candidates["매매검증"] = candidates.apply(validation, axis=1)
     st.dataframe(
         candidates[["종목명", "시장", "현재가", "등락률(%)", "거래량비율", "AI점수", "판정", "매매검증"]].head(10),
         use_container_width=True, hide_index=True
