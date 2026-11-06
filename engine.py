@@ -16,7 +16,7 @@ def initialize_state():
     defaults = {
         "initial_cash": 500000.0, "cash": 500000.0, "max_position": 150000,
         "max_positions": 3, "daily_loss_limit": 10000, "buy_threshold": 80,
-        "take_profit_pct": 1.5, "stop_loss_pct": 1.0, "auto_trade": False,
+        "trailing_activation_pct": 1.0, "trailing_gap_pct": 1.0, "stop_loss_pct": 1.0, "auto_trade": False,
         "positions": {}, "trades": [], "realized_pnl": 0.0,
         "daily_realized": 0.0, "session_day": str(date.today()),
         "market": {}, "tick": 0, "daily_halted": False,
@@ -122,13 +122,20 @@ def run_strategy(scored):
         pos = st.session_state.positions[code]
         q = st.session_state.market[code]
         ret = (q["price"] / pos["avg_price"] - 1) * 100
+        # Track the highest price reached since entry for a trailing exit.
+        pos["peak_price"] = max(float(pos.get("peak_price", pos["avg_price"])), float(q["price"]))
+        peak_return = (pos["peak_price"] / pos["avg_price"] - 1) * 100
+        drawdown_from_peak = (q["price"] / pos["peak_price"] - 1) * 100
         reason = None
-        if ret >= st.session_state.take_profit_pct:
-            reason = "익절 기준 도달"
-        elif ret <= -st.session_state.stop_loss_pct:
-            reason = "손절 기준 도달"
-        elif q["trend"] < -1.8:
-            reason = "추세 약화"
+        if ret <= -st.session_state.stop_loss_pct:
+            reason = "사전 설정 손절선 도달"
+        elif (
+            peak_return >= st.session_state.trailing_activation_pct
+            and drawdown_from_peak <= -st.session_state.trailing_gap_pct
+        ):
+            reason = "트레일링 스톱: 고점 대비 하락"
+        elif q["trend"] < -1.8 or (q["trend"] < 0 and q["momentum"] < 0):
+            reason = "추세 이탈"
         if reason:
             qty = pos["qty"]
             proceeds = qty * q["price"]
@@ -174,7 +181,7 @@ def run_strategy(scored):
             continue
         cost = qty * q["price"]
         st.session_state.cash -= cost
-        st.session_state.positions[code] = {"qty": qty, "avg_price": q["price"]}
+        st.session_state.positions[code] = {"qty": qty, "avg_price": q["price"], "peak_price": q["price"]}
         st.session_state.last_buy_tick[code] = st.session_state.tick
         _record("매수", q, qty, q["price"], f"AI 점수 {score}점 · 손실예산 0.5% · 추가매수 금지")
 
