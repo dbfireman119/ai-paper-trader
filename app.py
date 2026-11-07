@@ -202,3 +202,44 @@ with st.expander("전체 전략 성과 한눈에 비교"):
             "보유종목": len(pf["positions"]), "총 체결": len(pf["trades"]),
         })
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+st.divider()
+st.header("📊 실제 종목 상승·하락 신호 분석")
+st.caption("NH투자증권 일별 시세를 조회해 이동평균선·RSI·MACD·볼린저밴드·거래량을 종합 분석합니다. 이 기능은 조회 전용이며 실제 주문을 실행하지 않습니다.")
+with st.form("real_stock_signal_form"):
+    signal_code = st.text_input("종목코드 6자리", value="005930", max_chars=6)
+    signal_market = st.selectbox("조회 시장", ["KRX", "NXT", "UNT"], index=0)
+    signal_submit = st.form_submit_button("실제 시세 조회 및 신호 분석", use_container_width=True)
+
+if signal_submit:
+    if not signal_code.isdigit() or len(signal_code) != 6:
+        st.error("종목코드 6자리를 숫자로 입력해주세요.")
+    else:
+        try:
+            from nh_api import get_daily_history
+            from signals import analyze_daily_bars
+            with st.spinner("NH투자증권에서 일별 시세를 조회하고 있습니다..."):
+                daily_rows = get_daily_history(signal_code, signal_market, 80)
+                analysis = analyze_daily_bars(daily_rows)
+            st.session_state["last_real_signal"] = analysis
+            st.session_state["last_real_signal_code"] = signal_code
+        except Exception as exc:
+            st.error(f"실제 시세 분석 실패: {exc}")
+
+if st.session_state.get("last_real_signal"):
+    result = st.session_state["last_real_signal"]
+    signal_code_saved = st.session_state.get("last_real_signal_code", "")
+    color = "success" if result["signal"] == "상승" else "danger" if result["signal"] == "하락" else "warning"
+    st.subheader(f"{signal_code_saved} 분석 결과")
+    st.metric("종합 신호", result["signal"], f"점수 {result['score']:+d}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("최근 종가", f"{result['close']:,.0f}원")
+    c2.metric("RSI(14)", f"{result['rsi14']:.1f}")
+    c3.metric("MACD", f"{result['macd']:.2f}")
+    c4.metric("거래량 비율", f"{result['volume_ratio']:.2f}배")
+    st.caption(f"기준일: {result['date']} · 분석 데이터: {result['bars']}거래일")
+    st.markdown("**신호 근거**")
+    for reason in result["reasons"]:
+        st.write(f"• {reason}")
+    st.caption("상승·하락 신호는 확률이나 수익 보장이 아닙니다. 실제 매매 전 별도 검증이 필요합니다.")
