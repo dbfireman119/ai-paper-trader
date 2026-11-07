@@ -25,7 +25,7 @@ def get_current_price(code: str, market: str = "KRX") -> dict[str, Any]:
     # Namuh PLUG production token is issued by api.nhplug.com.
     # Quote requests can be routed to the mock endpoint using NHPLUG_BASE_URL.
     os.environ.setdefault("NHPLUG_AUTH_URL", "https://api.nhplug.com:8443")
-    os.environ.setdefault("NHPLUG_BASE_URL", "https://moapi.nhplug.com:8443")
+    os.environ.setdefault("NHPLUG_BASE_URL", "https://api.nhplug.com:8443")
 
     from nhplug import call
 
@@ -57,7 +57,7 @@ def get_daily_history(code: str, market: str = "KRX", count: int = 80) -> list[d
             "Render 환경변수 NHPLUG_APP_KEY / NHPLUG_APP_SECRET가 설정되지 않았습니다."
         )
     os.environ.setdefault("NHPLUG_AUTH_URL", "https://api.nhplug.com:8443")
-    os.environ.setdefault("NHPLUG_BASE_URL", "https://moapi.nhplug.com:8443")
+    os.environ.setdefault("NHPLUG_BASE_URL", "https://api.nhplug.com:8443")
 
     from nhplug import call
 
