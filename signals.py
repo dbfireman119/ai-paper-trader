@@ -40,7 +40,7 @@ def analyze_daily_bars(rows: list[dict]) -> dict:
     delta = close.diff()
     gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
     loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
-    rs = gain / loss.replace(0, pd.NA)
+    rs = gain / loss.where(loss != 0)
     df["rsi14"] = 100 - (100 / (1 + rs))
     df.loc[(loss == 0) & (gain > 0), "rsi14"] = 100
     df.loc[(loss == 0) & (gain == 0), "rsi14"] = 50
