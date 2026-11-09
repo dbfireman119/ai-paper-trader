@@ -1,13 +1,15 @@
 import os
 import hmac
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 from engine import (
     STRATEGIES, initialize_state, score_universe,
     run_strategy, portfolio_snapshot, reset_session
 )
-from live_market import fetch_live_universe
+from live_market import fetch_live_quotes
+from market_scanner import start_scan, get_scan_state
 
 st.set_page_config(page_title="AI 모의매매 비교", page_icon="📈", layout="wide")
 
@@ -40,7 +42,14 @@ with st.sidebar:
     st.subheader("공통 운용")
     st.metric("각 전략 초기 자금", "500,000원")
     st.toggle("두 전략 자동 모의매매", key="auto_trade")
-    st.caption("켜면 동일한 가상 시세를 공유하면서 안정형과 공격형이 각각 독립된 현금·보유종목으로 매매합니다.")
+    st.caption("켜면 동일한 NH 실제 시세를 기준으로 안정형과 공격형이 각각 독립된 가상계좌에서 매매합니다.")
+    st.divider()
+    st.subheader("전체 시장 스캔")
+    scan_info = get_scan_state()
+    if st.button("전체 종목 다시 점수화", use_container_width=True, disabled=scan_info["status"] == "running"):
+        start_scan(force=True)
+        st.rerun()
+    st.caption("국내주식 종목마스터를 기준으로 전체 상장주식의 최근 80거래일을 분석합니다. 최초 스캔은 API 호출량에 따라 수 분 이상 걸릴 수 있습니다.")
     st.divider()
     st.subheader("나무증권 API")
     st.caption("실제 시세만 조회합니다. 모든 매수·매도는 프로그램 내부 가상계좌에서만 처리합니다.")
@@ -161,42 +170,86 @@ def show_strategy(name):
         use_container_width=True, hide_index=True
     )
 
+# Start a fresh full-market scan once per trading date.
+scan_info = get_scan_state()
+today_kst = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+if scan_info["status"] == "idle" or (
+    scan_info["status"] == "complete"
+    and (scan_info.get("finished_at") or "")[:10] != today_kst
+):
+    start_scan()
+
+scored = pd.DataFrame()
+top200_scored = pd.DataFrame()
+
 @st.fragment(run_every="30s")
 def live_panel():
-    global scored
+    global scored, top200_scored
+    scan = get_scan_state()
+    if scan["status"] in {"idle", "starting", "running"}:
+        if scan["total"]:
+            progress = min(1.0, scan["done"] / scan["total"])
+            st.progress(progress, text=f"전체 종목 분석 중: {scan['done']:,}/{scan['total']:,} · 성공 {scan['success']:,} · 제외/오류 {scan['failed']:,}")
+        else:
+            st.info("NH투자증권 전체 종목마스터를 불러오는 중입니다.")
+        st.caption("전체 종목의 최근 80거래일을 순차 분석합니다. 분석이 끝날 때까지 자동 모의매매는 시작되지 않습니다.")
+        return
+    if scan["status"] == "error":
+        st.error(f"전체 종목 스캔 실패: {scan.get('error')}")
+        return
+    daily_market = scan["market"]
+    if not daily_market:
+        st.warning("분석 가능한 종목 데이터가 없습니다.")
+        return
+
+    st.session_state.market = dict(daily_market)
+    daily_scored = score_universe()
+    top200_daily = daily_scored.head(200)
+    top20_codes = top200_daily[top200_daily["거래가능"]]["code"].head(20).tolist()
+    held_codes = []
+    for pf in st.session_state.portfolios.values():
+        held_codes.extend(list(pf["positions"].keys()))
+    active_codes = list(dict.fromkeys(top20_codes + held_codes))
+
     try:
-        quotes = fetch_live_universe()
-        st.session_state.market = quotes
+        live_quotes = fetch_live_quotes(active_codes, daily_market)
+        st.session_state.market.update(live_quotes)
         st.session_state["live_quote_error"] = None
         st.session_state.tick += 1
-        scored = score_universe()
-        now = datetime.now()
+        all_scored = score_universe()
+        top200_scored = all_scored.head(200).copy()
+        top20_scored = top200_scored[top200_scored["거래가능"]].head(20).copy()
+        scored = top20_scored
+        now = datetime.now(ZoneInfo("Asia/Seoul"))
         market_open = (
             now.weekday() < 5
             and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
-        if st.session_state.auto_trade and quotes and market_open:
+        if st.session_state.auto_trade and market_open and not top20_scored.empty:
             for strategy_name in STRATEGIES:
-                run_strategy(strategy_name, scored)
+                run_strategy(strategy_name, top20_scored)
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다. 시세 조회만 수행합니다.")
-        st.success(f"실제 시세 수신 정상 · {len(quotes)}개 종목 · 갱신 {datetime.now().strftime('%H:%M:%S')} · 30초 주기")
+
+        st.success(f"전체 분석 {len(daily_market):,}종목 · 상위 200개 선별 · 실시간 추적 {len(live_quotes)}개 · 갱신 {now.strftime('%H:%M:%S')}")
+        st.subheader("🏆 전체 시장 점수 상위 200개")
+        st.caption("순위는 전체 종목의 최근 일봉 지표로 산출합니다. 상위 20개 거래가능 종목만 실시간 현재가를 갱신해 두 전략의 가상매매 후보로 사용합니다.")
+        display_cols = ["종목명", "시장", "현재가", "등락률(%)", "거래량비율", "AI점수", "거래가능", "매매검증"]
+        st.dataframe(top200_scored[display_cols], use_container_width=True, hide_index=True, height=520)
+        st.caption(f"분석 기준일: {max(q.get('history_date', '') for q in daily_market.values())} · 스캔 완료: {scan.get('finished_at', '')}")
     except Exception as exc:
         st.session_state["live_quote_error"] = str(exc)
-        st.session_state.market = {}
-        scored = score_universe()
-        st.error(f"실제 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
-    if not st.session_state.get("market"):
-        st.warning("실제 시세가 아직 없습니다. API 연결과 장 운영시간을 확인해 주세요.")
-        return
-    t1, t2 = st.tabs(["🛡️ 안정형 모의매매", "🚀 공격형 모의매매"])
-    with t1:
-        show_strategy("안정형")
-    with t2:
-        show_strategy("공격형")
+        scored = pd.DataFrame()
+        st.error(f"실시간 후보 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
 
-scored = score_universe()
+    if st.session_state.get("market"):
+        t1, t2 = st.tabs(["🛡️ 안정형 모의매매", "🚀 공격형 모의매매"])
+        with t1:
+            show_strategy("안정형")
+        with t2:
+            show_strategy("공격형")
+
 live_panel()
 
 with st.expander("두 전략의 비교 기준 및 주의사항"):
