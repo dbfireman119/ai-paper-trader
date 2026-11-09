@@ -10,6 +10,7 @@ from engine import (
 )
 from live_market import fetch_live_quotes
 from market_scanner import start_scan, get_scan_state
+from db_store import save_state
 
 st.set_page_config(page_title="AI 모의매매 비교", page_icon="📈", layout="wide")
 
@@ -35,6 +36,10 @@ if not st.session_state.get("site_authenticated", False):
     st.stop()
 
 initialize_state()
+if st.session_state.get('persistence_restored'):
+    st.success('Saved paper portfolio restored.')
+elif st.session_state.get('persistence_error'):
+    st.warning('Database is not connected yet; this session is temporary.')
 st.title("📈 AI 모의매매 전략 비교")
 st.caption("NH투자증권 실제 국내주식 시세 기반 · 안정형·공격형 독립 가상계좌 · 실제 주문 기능 없음")
 
@@ -249,6 +254,11 @@ def live_panel():
             show_strategy("안정형")
         with t2:
             show_strategy("공격형")
+        try:
+            save_state(st.session_state.portfolios, st.session_state.strategy_settings)
+            st.caption("Paper accounts saved to database.")
+        except Exception as exc:
+            st.error(f"Portfolio save failed: {exc}")
 
 live_panel()
 
