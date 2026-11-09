@@ -110,7 +110,25 @@ def show_strategy(name):
         f"일일 손실한도 {cfg['daily_loss_limit']:,}원"
     )
     with st.expander(f"{name} 세부 설정 조절", expanded=False):
-        st.caption("이 설정은 현재 로그인 세션의 해당 전략에만 적용됩니다. 두 탭은 서로 독립적으로 조절할 수 있습니다.")
+        st.caption("이 설정은 해당 전략에만 적용됩니다. 초기값 복원은 설정값만 변경하며 보유 종목·거래 내역·가상 잔액은 초기화하지 않습니다.")
+        if st.button(f"↩ {name} 설정을 처음값으로 복원", key=f"{name}_reset_settings", use_container_width=True):
+            st.session_state.strategy_settings[name] = dict(STRATEGIES[name])
+            widget_keys = [
+                f"{name}_threshold", f"{name}_max_positions", f"{name}_max_position",
+                f"{name}_min_trend", f"{name}_min_momentum", f"{name}_min_volume",
+                f"{name}_max_risk", f"{name}_max_change", f"{name}_reserve",
+                f"{name}_stop", f"{name}_trail_start", f"{name}_trail_gap",
+                f"{name}_risk_budget", f"{name}_daily_loss",
+            ]
+            for widget_key in widget_keys:
+                st.session_state.pop(widget_key, None)
+            try:
+                save_strategy_settings(st.session_state.strategy_settings)
+            except Exception as exc:
+                st.error(f"초기 설정 저장 실패: {exc}")
+                st.stop()
+            st.success(f"{name} 설정을 최초 기본값으로 복원했습니다.")
+            st.rerun()
         x1, x2, x3 = st.columns(3)
         cfg["buy_threshold"] = x1.slider("매수 최소 점수", 40, 95, int(cfg["buy_threshold"]), key=f"{name}_threshold")
         cfg["max_positions"] = x2.slider("최대 보유 종목 수", 1, 8, int(cfg["max_positions"]), key=f"{name}_max_positions")
