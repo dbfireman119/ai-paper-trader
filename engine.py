@@ -3,7 +3,7 @@ import copy
 from datetime import datetime, date
 import streamlit as st
 import pandas as pd
-from db_store import load_state, save_state
+from db_store import load_state, save_state, get_auto_trade_enabled
 
 STRATEGIES = {
     "안정형": {
@@ -53,7 +53,10 @@ def initialize_state():
     if "tick" not in st.session_state:
         st.session_state.tick = 0
     if "auto_trade" not in st.session_state:
-        st.session_state.auto_trade = False
+        try:
+            st.session_state.auto_trade = get_auto_trade_enabled(default=True)
+        except Exception:
+            st.session_state.auto_trade = False
 
 def reset_session():
     for key in list(st.session_state.keys()):
