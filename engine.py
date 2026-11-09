@@ -44,24 +44,33 @@ def initialize_state():
     # Do not invent prices or symbols. Wait for the read-only live quote feed.
     if "market" not in st.session_state:
         st.session_state.market = {}
+
+    # Restore missing state once, then always migrate older in-memory sessions
+    # so newly added strategies are available without resetting existing accounts.
     if "portfolios" not in st.session_state or "strategy_settings" not in st.session_state:
         restored = None
         try:
             restored = load_state()
         except Exception as exc:
             st.session_state["persistence_error"] = str(exc)
-        if restored:
+
+        if "portfolios" not in st.session_state:
             st.session_state.portfolios = {
                 **{name: _new_portfolio() for name in STRATEGIES},
-                **restored.get("portfolios", {}),
+                **(restored.get("portfolios", {}) if restored else {}),
             }
-            st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
-            st.session_state.strategy_settings.update(restored.get("strategy_settings", {}))
-            st.session_state["persistence_restored"] = True
-        else:
-            st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
-            st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
-            st.session_state["persistence_restored"] = False
+        if "strategy_settings" not in st.session_state:
+            settings = copy.deepcopy(STRATEGIES)
+            if restored:
+                settings.update(restored.get("strategy_settings", {}))
+            st.session_state.strategy_settings = settings
+        st.session_state["persistence_restored"] = bool(restored)
+
+    # Add any strategy introduced by a newer deployment to an existing session.
+    for name, defaults in STRATEGIES.items():
+        st.session_state.portfolios.setdefault(name, _new_portfolio())
+        st.session_state.strategy_settings.setdefault(name, copy.deepcopy(defaults))
+
     if "tick" not in st.session_state:
         st.session_state.tick = 0
     if "auto_trade" not in st.session_state:
