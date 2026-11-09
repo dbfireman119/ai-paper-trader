@@ -4,15 +4,6 @@ from datetime import datetime, date
 import streamlit as st
 import pandas as pd
 
-DEMO_NAMES = [
-    "모의반도체", "모의바이오", "모의로봇", "모의전력", "모의화학",
-    "모의게임", "모의자동차", "모의통신", "모의소재", "모의AI",
-    "모의건설", "모의금융", "모의유통", "모의배터리", "모의항공",
-    "모의조선", "모의콘텐츠", "모의의료", "모의보안", "모의환경",
-    "모의부품", "모의반도체2", "모의헬스", "모의에너지", "모의물류",
-    "모의소프트웨어", "모의기계", "모의식품", "모의서비스", "모의장비"
-]
-
 STRATEGIES = {
     "안정형": {
         "max_position": 150000, "max_positions": 3, "cash_reserve": 50000,
@@ -41,22 +32,9 @@ def _new_portfolio():
     }
 
 def initialize_state():
-    if "market" not in st.session_state or not st.session_state.market:
-        rng = random.Random(119)
-        market = {}
-        for i, name in enumerate(DEMO_NAMES):
-            code = f"DEMO{i+1:04d}"
-            base = rng.randint(8000, 120000)
-            market[code] = {
-                "code": code, "name": name,
-                "market": "KOSPI" if i % 2 == 0 else "KOSDAQ",
-                "price": float(base), "prev": float(base),
-                "volume_ratio": rng.uniform(0.8, 2.8),
-                "momentum": rng.uniform(-1.5, 2.5),
-                "trend": rng.uniform(-1.0, 2.0),
-                "risk": rng.uniform(0.0, 1.0),
-            }
-        st.session_state.market = market
+    # Do not invent prices or symbols. Wait for the read-only live quote feed.
+    if "market" not in st.session_state:
+        st.session_state.market = {}
     if "portfolios" not in st.session_state:
         st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
     if "strategy_settings" not in st.session_state:
@@ -109,6 +87,11 @@ def score_universe():
             "품질조건": not gates, "매매검증": "조건 충족" if not gates else ", ".join(gates),
             "추세값": q["trend"], "모멘텀값": q["momentum"], "위험도": q["risk"],
         })
+    if not rows:
+        return pd.DataFrame(columns=[
+            "code", "종목명", "시장", "현재가", "등락률(%)", "거래량비율",
+            "AI점수", "품질조건", "매매검증", "추세값", "모멘텀값", "위험도"
+        ])
     return pd.DataFrame(rows).sort_values(["AI점수", "거래량비율"], ascending=False).reset_index(drop=True)
 
 def _daily_pnl(pf):
