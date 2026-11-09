@@ -240,7 +240,7 @@ def live_panel():
         st.caption(f"분석 기준일: {max(q.get('history_date', '') for q in daily_market.values())} · 스캔 완료: {scan.get('finished_at', '')}")
     except Exception as exc:
         st.session_state["live_quote_error"] = str(exc)
-        scored = pd.DataFrame()
+        scored = score_universe().head(0)
         st.error(f"실시간 후보 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
 
     if st.session_state.get("market"):
