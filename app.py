@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 from engine import (
     STRATEGIES, initialize_state, score_universe,
-    portfolio_snapshot, reset_session, run_strategy
+    portfolio_snapshot, reset_session, run_strategy, _new_portfolio
 )
 from live_market import fetch_live_quotes
 from market_scanner import start_scan, get_scan_state
@@ -225,7 +225,7 @@ def live_panel():
             # Merge database state with current strategy defaults. Older DB rows
             # may not contain newly introduced strategies such as scalping.
             st.session_state.portfolios = {
-                **{name: __import__("engine")._new_portfolio() for name in STRATEGIES},
+                **{name: _new_portfolio() for name in STRATEGIES},
                 **latest_state.get("portfolios", {}),
             }
             merged_settings = {name: dict(cfg) for name, cfg in STRATEGIES.items()}
