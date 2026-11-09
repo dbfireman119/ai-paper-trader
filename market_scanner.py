@@ -11,6 +11,7 @@ import streamlit as st
 
 from nhplug.instruments import load_master
 from nh_api import get_daily_history
+from db_store import load_market_cache, save_market_cache
 
 _LOCK = threading.RLock()
 _STATE = {
@@ -123,6 +124,12 @@ def _worker():
                     # Publish incremental results so the UI can show scan progress.
                     if _STATE["done"] % 25 == 0 or _STATE["done"] == _STATE["total"]:
                         _STATE["market"] = dict(market)
+        today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+        try:
+            save_market_cache(today, market)
+        except Exception as exc:
+            with _LOCK:
+                _STATE["cache_error"] = str(exc)
         with _LOCK:
             _STATE.update(status="complete", market=market,
                           finished_at=datetime.now(ZoneInfo("Asia/Seoul")).isoformat())
@@ -137,6 +144,26 @@ def start_scan(force: bool = False) -> bool:
         if _STATE["status"] == "running":
             return False
         if _STATE["status"] == "complete" and not force:
+            return False
+
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+    if not force:
+        try:
+            cached_market = load_market_cache(today)
+        except Exception:
+            cached_market = None
+        if cached_market:
+            with _LOCK:
+                _STATE.update(
+                    status="complete", total=len(cached_market),
+                    done=len(cached_market), success=len(cached_market), failed=0,
+                    market=cached_market, error=None,
+                    started_at=None, finished_at=f"{today}T00:00:00+09:00",
+                )
+            return True
+
+    with _LOCK:
+        if _STATE["status"] == "running":
             return False
         _STATE.update(status="starting", total=0, done=0, success=0, failed=0,
                       market={}, error=None, started_at=None, finished_at=None)
