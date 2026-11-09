@@ -22,6 +22,14 @@ STRATEGIES = {
         "min_trend": -0.5, "min_momentum": -0.5, "min_volume_ratio": 0.8,
         "max_risk": 0.9, "max_change_pct": 5.0,
     },
+    "스캘핑형": {
+        "max_position": 100000, "max_positions": 2, "cash_reserve": 100000,
+        "daily_loss_limit": 5000, "buy_threshold": 78,
+        "stop_loss_pct": 0.7, "trailing_activation_pct": 0.8,
+        "trailing_gap_pct": 0.4, "risk_budget_pct": 0.3,
+        "min_trend": 0.2, "min_momentum": 0.3, "min_volume_ratio": 1.5,
+        "max_risk": 0.55, "max_change_pct": 3.0,
+    },
 }
 
 def _new_portfolio():
@@ -43,8 +51,12 @@ def initialize_state():
         except Exception as exc:
             st.session_state["persistence_error"] = str(exc)
         if restored:
-            st.session_state.portfolios = restored["portfolios"]
-            st.session_state.strategy_settings = restored["strategy_settings"]
+            st.session_state.portfolios = {
+                **{name: _new_portfolio() for name in STRATEGIES},
+                **restored.get("portfolios", {}),
+            }
+            st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
+            st.session_state.strategy_settings.update(restored.get("strategy_settings", {}))
             st.session_state["persistence_restored"] = True
         else:
             st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
