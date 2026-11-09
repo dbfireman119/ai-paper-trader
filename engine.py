@@ -80,17 +80,19 @@ def score_universe():
         if q["volume_ratio"] < 1.1: gates.append("거래량 확인 부족")
         if q["risk"] > 0.70: gates.append("위험도 높음")
         if change > 3.0: gates.append("급등 추격매수 제한")
+        if not q.get("tradable", True): gates.append("거래정지·관리·투자주의 등 제외")
         rows.append({
             "code": q["code"], "종목명": q["name"], "시장": q["market"],
             "현재가": round(q["price"], 0), "등락률(%)": round(change, 2),
             "거래량비율": round(q["volume_ratio"], 2), "AI점수": score,
-            "품질조건": not gates, "매매검증": "조건 충족" if not gates else ", ".join(gates),
+            "품질조건": not gates, "거래가능": bool(q.get("tradable", True)),
+            "매매검증": "조건 충족" if not gates else ", ".join(gates),
             "추세값": q["trend"], "모멘텀값": q["momentum"], "위험도": q["risk"],
         })
     if not rows:
         return pd.DataFrame(columns=[
             "code", "종목명", "시장", "현재가", "등락률(%)", "거래량비율",
-            "AI점수", "품질조건", "매매검증", "추세값", "모멘텀값", "위험도"
+            "AI점수", "품질조건", "거래가능", "매매검증", "추세값", "모멘텀값", "위험도"
         ])
     return pd.DataFrame(rows).sort_values(["AI점수", "거래량비율"], ascending=False).reset_index(drop=True)
 
