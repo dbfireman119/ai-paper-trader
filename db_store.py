@@ -66,3 +66,101 @@ def save_state(portfolios: dict, strategy_settings: dict) -> None:
                     updated_at = NOW()
             """, (payload_portfolios, payload_settings))
         conn.commit()
+
+
+def get_auto_trade_enabled(default: bool = True) -> bool:
+    initialize_database()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS paper_trader_control (
+                    control_key TEXT PRIMARY KEY,
+                    enabled BOOLEAN NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("SELECT enabled FROM paper_trader_control WHERE control_key='auto_trade'")
+            row = cur.fetchone()
+            if row is None:
+                cur.execute(
+                    "INSERT INTO paper_trader_control (control_key, enabled) VALUES ('auto_trade', %s) ON CONFLICT DO NOTHING",
+                    (bool(default),)
+                )
+                conn.commit()
+                return bool(default)
+            return bool(row[0])
+
+
+def save_auto_trade_enabled(enabled: bool) -> None:
+    initialize_database()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO paper_trader_control (control_key, enabled, updated_at)
+                VALUES ('auto_trade', %s, NOW())
+                ON CONFLICT (control_key) DO UPDATE
+                SET enabled=EXCLUDED.enabled, updated_at=NOW()
+            """, (bool(enabled),))
+        conn.commit()
+
+
+def save_strategy_settings(strategy_settings: dict) -> None:
+    initialize_database()
+    payload = json.dumps(strategy_settings, ensure_ascii=False)
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE paper_trader_state
+                SET strategy_settings=%s::jsonb, updated_at=NOW()
+                WHERE state_key='main'
+            """, (payload,))
+        conn.commit()
+
+
+def save_portfolios(portfolios: dict) -> None:
+    initialize_database()
+    payload = json.dumps(portfolios, ensure_ascii=False)
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE paper_trader_state
+                SET portfolios=%s::jsonb, updated_at=NOW()
+                WHERE state_key='main'
+            """, (payload,))
+        conn.commit()
+
+
+def load_market_cache(cache_date: str) -> dict[str, Any] | None:
+    initialize_database()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS paper_trader_market_cache (
+                    cache_date DATE PRIMARY KEY,
+                    market JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "SELECT market FROM paper_trader_market_cache WHERE cache_date=%s::date",
+                (cache_date,)
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    market = row[0]
+    return json.loads(market) if isinstance(market, str) else market
+
+
+def save_market_cache(cache_date: str, market: dict) -> None:
+    initialize_database()
+    payload = json.dumps(market, ensure_ascii=False, allow_nan=False)
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO paper_trader_market_cache (cache_date, market, updated_at)
+                VALUES (%s::date, %s::jsonb, NOW())
+                ON CONFLICT (cache_date) DO UPDATE
+                SET market=EXCLUDED.market, updated_at=NOW()
+            """, (cache_date, payload))
+        conn.commit()
