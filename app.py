@@ -222,8 +222,15 @@ def live_panel():
     try:
         latest_state = load_state()
         if latest_state:
-            st.session_state.portfolios = latest_state["portfolios"]
-            st.session_state.strategy_settings = latest_state["strategy_settings"]
+            # Merge database state with current strategy defaults. Older DB rows
+            # may not contain newly introduced strategies such as scalping.
+            st.session_state.portfolios = {
+                **{name: __import__("engine")._new_portfolio() for name in STRATEGIES},
+                **latest_state.get("portfolios", {}),
+            }
+            merged_settings = {name: dict(cfg) for name, cfg in STRATEGIES.items()}
+            merged_settings.update(latest_state.get("strategy_settings", {}))
+            st.session_state.strategy_settings = merged_settings
     except Exception as exc:
         st.warning(f"공유 계좌 상태 갱신 실패: {exc}")
 
