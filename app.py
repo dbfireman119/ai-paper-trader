@@ -4,9 +4,10 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 from engine import (
-    STRATEGIES, initialize_state, advance_market, score_universe,
+    STRATEGIES, initialize_state, score_universe,
     run_strategy, portfolio_snapshot, reset_session
 )
+from live_market import fetch_live_universe
 
 st.set_page_config(page_title="AI 모의매매 비교", page_icon="📈", layout="wide")
 
@@ -33,7 +34,7 @@ if not st.session_state.get("site_authenticated", False):
 
 initialize_state()
 st.title("📈 AI 모의매매 전략 비교")
-st.caption("안정형·공격형 독립 모의계좌 동시 운용 · 가상 시세 DEMO · 실제 주문 기능 없음")
+st.caption("NH투자증권 실제 국내주식 시세 기반 · 안정형·공격형 독립 가상계좌 · 실제 주문 기능 없음")
 
 with st.sidebar:
     st.subheader("공통 운용")
@@ -42,7 +43,7 @@ with st.sidebar:
     st.caption("켜면 동일한 가상 시세를 공유하면서 안정형과 공격형이 각각 독립된 현금·보유종목으로 매매합니다.")
     st.divider()
     st.subheader("나무증권 API")
-    st.caption("현재는 연결 테스트만 제공하며 실제 시세·주문에는 연결하지 않습니다.")
+    st.caption("실제 시세만 조회합니다. 모든 매수·매도는 프로그램 내부 가상계좌에서만 처리합니다.")
     if st.button("나무증권 API 연결 테스트 (삼성전자)", use_container_width=True):
         try:
             from nh_api import get_current_price
@@ -57,7 +58,7 @@ with st.sidebar:
     elif st.session_state.get("nh_api_test_error"):
         st.error(f"API 연결 실패: {st.session_state['nh_api_test_error']}")
     else:
-        st.info("키 미등록 상태에서는 가상 시세로 계속 실행됩니다.")
+        st.info("실제 시세 연동 모드입니다. API 오류 시 가상 시세로 대체하지 않고 매매를 중지합니다.")
     st.divider()
     if st.button("두 모의계좌 모두 초기화", use_container_width=True):
         reset_session()
@@ -160,15 +161,26 @@ def show_strategy(name):
         use_container_width=True, hide_index=True
     )
 
-@st.fragment(run_every="5s")
+@st.fragment(run_every="30s")
 def live_panel():
-    advance_market()
     global scored
-    scored = score_universe()
-    if st.session_state.auto_trade:
-        for strategy_name in STRATEGIES:
-            run_strategy(strategy_name, scored)
-    st.caption(f"가상 시세 갱신: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · 5초 주기")
+    try:
+        quotes = fetch_live_universe()
+        st.session_state.market = quotes
+        st.session_state["live_quote_error"] = None
+        st.session_state.tick += 1
+        scored = score_universe()
+        if st.session_state.auto_trade and quotes:
+            for strategy_name in STRATEGIES:
+                run_strategy(strategy_name, scored)
+        st.success(f"실제 시세 수신 정상 · {len(quotes)}개 종목 · 갱신 {datetime.now().strftime('%H:%M:%S')} · 30초 주기")
+    except Exception as exc:
+        st.session_state["live_quote_error"] = str(exc)
+        scored = score_universe()
+        st.error(f"실제 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
+    if not st.session_state.get("market"):
+        st.warning("실제 시세가 아직 없습니다. API 연결과 장 운영시간을 확인해 주세요.")
+        return
     t1, t2 = st.tabs(["🛡️ 안정형 모의매매", "🚀 공격형 모의매매"])
     with t1:
         show_strategy("안정형")
