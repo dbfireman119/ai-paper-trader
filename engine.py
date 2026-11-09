@@ -111,16 +111,25 @@ def score_universe():
         ])
     return pd.DataFrame(rows).sort_values(["AI점수", "거래량비율"], ascending=False).reset_index(drop=True)
 
+def _position_mark_price(code, pos):
+    """Return the latest quote, or the last known/entry price if a quote is missing."""
+    quote = st.session_state.market.get(code)
+    if quote and quote.get("price") is not None:
+        price = float(quote["price"])
+        pos["last_price"] = price
+        return price
+    return float(pos.get("last_price", pos.get("avg_price", 0.0)))
+
 def _daily_pnl(pf):
     unrealized = sum(
-        (st.session_state.market[code]["price"] - pos["avg_price"]) * pos["qty"]
+        (_position_mark_price(code, pos) - pos["avg_price"]) * pos["qty"]
         for code, pos in pf["positions"].items()
     )
     return pf["daily_realized"] + unrealized
 
 def _snapshot(pf):
     market_value = sum(
-        pos["qty"] * st.session_state.market[code]["price"]
+        pos["qty"] * _position_mark_price(code, pos)
         for code, pos in pf["positions"].items()
     )
     equity = pf["cash"] + market_value
@@ -147,7 +156,11 @@ def run_strategy(name, scored):
 
     for code in list(pf["positions"].keys()):
         pos = pf["positions"][code]
-        q = st.session_state.market[code]
+        # Missing quote must not crash the dashboard or trigger a fabricated exit.
+        q = st.session_state.market.get(code)
+        if not q or q.get("price") is None:
+            continue
+        pos["last_price"] = float(q["price"])
         ret = (q["price"] / pos["avg_price"] - 1) * 100
         pos["peak_price"] = max(float(pos.get("peak_price", pos["avg_price"])), float(q["price"]))
         peak_return = (pos["peak_price"] / pos["avg_price"] - 1) * 100
