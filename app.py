@@ -6,16 +6,22 @@ import pandas as pd
 import streamlit as st
 from engine import (
     STRATEGIES, initialize_state, score_universe,
-    run_strategy, portfolio_snapshot, reset_session
+    portfolio_snapshot, reset_session
 )
 from live_market import fetch_live_quotes
 from market_scanner import start_scan, get_scan_state
-from db_store import save_state
+from db_store import load_state, save_strategy_settings, save_auto_trade_enabled
 
 st.set_page_config(page_title="AI 모의매매 비교", page_icon="📈", layout="wide")
 
 site_username = os.getenv("SITE_USERNAME", "")
 site_password = os.getenv("SITE_PASSWORD", "")
+
+def persist_auto_trade_toggle():
+    try:
+        save_auto_trade_enabled(bool(st.session_state.get("auto_trade", False)))
+    except Exception as exc:
+        st.session_state["auto_trade_save_error"] = str(exc)
 if not site_username or not site_password:
     st.error("사이트 접근 설정이 완료되지 않았습니다. 관리자에게 문의하세요.")
     st.stop()
@@ -46,7 +52,9 @@ st.caption("NH투자증권 실제 국내주식 시세 기반 · 안정형·공�
 with st.sidebar:
     st.subheader("공통 운용")
     st.metric("각 전략 초기 자금", "500,000원")
-    st.toggle("두 전략 자동 모의매매", key="auto_trade")
+    st.toggle("두 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
+    if st.session_state.get("auto_trade_save_error"):
+        st.warning(f"자동매매 설정 저장 실패: {st.session_state['auto_trade_save_error']}")
     st.caption("켜면 동일한 NH 실제 시세를 기준으로 안정형과 공격형이 각각 독립된 가상계좌에서 매매합니다.")
     st.divider()
     st.subheader("전체 시장 스캔")
@@ -207,6 +215,14 @@ def live_panel():
         st.warning("분석 가능한 종목 데이터가 없습니다.")
         return
 
+    try:
+        latest_state = load_state()
+        if latest_state:
+            st.session_state.portfolios = latest_state["portfolios"]
+            st.session_state.strategy_settings = latest_state["strategy_settings"]
+    except Exception as exc:
+        st.warning(f"공유 계좌 상태 갱신 실패: {exc}")
+
     st.session_state.market = dict(daily_market)
     daily_scored = score_universe()
     top200_daily = daily_scored.head(200)
@@ -231,11 +247,10 @@ def live_panel():
             and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
-        if st.session_state.auto_trade and market_open and not top20_scored.empty:
-            for strategy_name in STRATEGIES:
-                run_strategy(strategy_name, top20_scored)
+        if st.session_state.auto_trade and market_open:
+            st.info("로그아웃 중에도 별도 스케줄러가 5분 간격으로 가상 매매를 처리합니다.")
         elif st.session_state.auto_trade and not market_open:
-            st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다. 시세 조회만 수행합니다.")
+            st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
         st.success(f"전체 분석 {len(daily_market):,}종목 · 상위 200개 선별 · 실시간 추적 {len(live_quotes)}개 · 갱신 {now.strftime('%H:%M:%S')}")
         st.subheader("🏆 전체 시장 점수 상위 200개")
