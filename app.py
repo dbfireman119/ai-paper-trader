@@ -6,11 +6,11 @@ import pandas as pd
 import streamlit as st
 from engine import (
     STRATEGIES, initialize_state, score_universe,
-    portfolio_snapshot, reset_session
+    portfolio_snapshot, reset_session, run_strategy
 )
 from live_market import fetch_live_quotes
 from market_scanner import start_scan, get_scan_state
-from db_store import load_state, save_strategy_settings, save_auto_trade_enabled
+from db_store import load_state, save_state, save_strategy_settings, save_auto_trade_enabled
 
 st.set_page_config(page_title="AI 모의매매 비교", page_icon="📈", layout="wide")
 
@@ -136,12 +136,16 @@ def show_strategy(name):
         if pf["positions"]:
             rows = []
             for code, pos in pf["positions"].items():
-                q = st.session_state.market[code]
+                q = st.session_state.market.get(code) or {}
+                price = float(q.get("price") or pos.get("last_price") or pos["avg_price"])
                 rows.append({
-                    "종목명": q["name"], "수량": pos["qty"],
-                    "매입가": round(pos["avg_price"]), "현재가": round(q["price"]),
-                    "수익률(%)": round((q["price"] / pos["avg_price"] - 1) * 100, 2),
-                    "평가손익": round((q["price"] - pos["avg_price"]) * pos["qty"]),
+                    "종목코드": code,
+                    "종목명": q.get("name") or pos.get("name") or code,
+                    "수량": pos["qty"],
+                    "매입가": round(pos["avg_price"]), "현재가": round(price),
+                    "수익률(%)": round((price / pos["avg_price"] - 1) * 100, 2),
+                    "평가손익": round((price - pos["avg_price"]) * pos["qty"]),
+                    "시세상태": "실시간" if q.get("price") is not None else "최근 확인가(시세 미수신)",
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else:
@@ -248,7 +252,10 @@ def live_panel():
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
         if st.session_state.auto_trade and market_open:
-            st.info("로그아웃 중에도 별도 스케줄러가 5분 간격으로 가상 매매를 처리합니다.")
+            # Execute both independent paper strategies using fresh read-only quotes.
+            run_strategy("안정형", scored)
+            run_strategy("공격형", scored)
+            st.success("안정형·공격형 가상 매매 판단 및 체결 처리 완료")
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
