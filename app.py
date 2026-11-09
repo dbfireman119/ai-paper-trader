@@ -170,12 +170,21 @@ def live_panel():
         st.session_state["live_quote_error"] = None
         st.session_state.tick += 1
         scored = score_universe()
-        if st.session_state.auto_trade and quotes:
+        now = datetime.now()
+        market_open = (
+            now.weekday() < 5
+            and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
+            and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
+        )
+        if st.session_state.auto_trade and quotes and market_open:
             for strategy_name in STRATEGIES:
                 run_strategy(strategy_name, scored)
+        elif st.session_state.auto_trade and not market_open:
+            st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다. 시세 조회만 수행합니다.")
         st.success(f"실제 시세 수신 정상 · {len(quotes)}개 종목 · 갱신 {datetime.now().strftime('%H:%M:%S')} · 30초 주기")
     except Exception as exc:
         st.session_state["live_quote_error"] = str(exc)
+        st.session_state.market = {}
         scored = score_universe()
         st.error(f"실제 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
     if not st.session_state.get("market"):
