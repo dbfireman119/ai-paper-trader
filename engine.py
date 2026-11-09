@@ -3,6 +3,7 @@ import copy
 from datetime import datetime, date
 import streamlit as st
 import pandas as pd
+from db_store import load_state, save_state
 
 STRATEGIES = {
     "안정형": {
@@ -35,10 +36,20 @@ def initialize_state():
     # Do not invent prices or symbols. Wait for the read-only live quote feed.
     if "market" not in st.session_state:
         st.session_state.market = {}
-    if "portfolios" not in st.session_state:
-        st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
-    if "strategy_settings" not in st.session_state:
-        st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
+    if "portfolios" not in st.session_state or "strategy_settings" not in st.session_state:
+        restored = None
+        try:
+            restored = load_state()
+        except Exception as exc:
+            st.session_state["persistence_error"] = str(exc)
+        if restored:
+            st.session_state.portfolios = restored["portfolios"]
+            st.session_state.strategy_settings = restored["strategy_settings"]
+            st.session_state["persistence_restored"] = True
+        else:
+            st.session_state.portfolios = {name: _new_portfolio() for name in STRATEGIES}
+            st.session_state.strategy_settings = copy.deepcopy(STRATEGIES)
+            st.session_state["persistence_restored"] = False
     if "tick" not in st.session_state:
         st.session_state.tick = 0
     if "auto_trade" not in st.session_state:
@@ -48,6 +59,7 @@ def reset_session():
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     initialize_state()
+    save_state(st.session_state.portfolios, st.session_state.strategy_settings)
 
 def advance_market():
     st.session_state.tick += 1
