@@ -50,13 +50,9 @@ try:
         except (TypeError, ValueError):
             return False
 
-    # CookieManager is a browser component. On a hard refresh its first
-    # Python pass can run before the browser has returned cookie values.
-    # Wait for component readiness instead of incorrectly showing the login form.
-    if not cookie_manager.ready():
-        st.info("로그인 상태를 확인하고 있습니다...")
-        st.stop()
-
+    # CookieManager in extra-streamlit-components does not expose ready().
+    # Read the browser cookies directly; the component returns its value on
+    # the Streamlit rerun after the browser component has initialized.
     if not st.session_state.get("site_authenticated", False):
         saved_cookies = cookie_manager.get_all() or {}
         saved_token = saved_cookies.get(auth_cookie_name)
