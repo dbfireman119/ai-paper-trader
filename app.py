@@ -47,15 +47,15 @@ if st.session_state.get('persistence_restored'):
 elif st.session_state.get('persistence_error'):
     st.warning('Database is not connected yet; this session is temporary.')
 st.title("📈 AI 모의매매 전략 비교")
-st.caption("NH투자증권 실제 국내주식 시세 기반 · 안정형·공격형·스캘핑형 독립 가상계좌 · 실제 주문 기능 없음")
+st.caption("NH투자증권 실제 국내주식 시세 기반 · 4개 독립 모의계좌 · 실제 주문 기능 없음")
 
 with st.sidebar:
     st.subheader("공통 운용")
     st.metric("각 전략 초기 자금", "500,000원")
-    st.toggle("3개 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
+    st.toggle("4개 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
     if st.session_state.get("auto_trade_save_error"):
         st.warning(f"자동매매 설정 저장 실패: {st.session_state['auto_trade_save_error']}")
-    st.caption("켜면 동일한 NH 실제 시세를 기준으로 안정형·공격형·스캘핑형이 각각 독립된 가상계좌에서 매매합니다.")
+    st.caption("켜면 안정형·공격형·스캘핑형이 독립 모의매매합니다. 정밀 스캘핑형은 실시간 데이터 수신 검증 후 별도 활성화합니다.")
     st.divider()
     st.subheader("전체 시장 스캔")
     scan_info = get_scan_state()
@@ -82,7 +82,7 @@ with st.sidebar:
     else:
         st.info("실제 시세 연동 모드입니다. API 오류 시 가상 시세로 대체하지 않고 매매를 중지합니다.")
     st.divider()
-    if st.button("세 모의계좌 모두 초기화", use_container_width=True):
+    if st.button("네 모의계좌 모두 초기화", use_container_width=True):
         reset_session()
         st.rerun()
 
@@ -289,11 +289,15 @@ def live_panel():
             and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
+        # Precision strategy first collects genuine NH PLUG real-time trade and
+        # order-book messages. Do not simulate or trade until payload fields and
+        # candle construction have been validated against live messages.
+        from precision_scalping import start_precision_feed, get_precision_feed_state
+        start_precision_feed(top20_codes)
         if st.session_state.auto_trade and market_open:
-            # Execute both independent paper strategies using fresh read-only quotes.
-            for strategy_name in STRATEGIES:
+            for strategy_name in ("안정형", "공격형", "스캘핑형"):
                 run_strategy(strategy_name, scored)
-            st.success("3개 전략 가상 매매 판단 및 체결 처리 완료")
+            st.success("기존 3개 전략 가상 매매 처리 완료 · 정밀 스캘핑은 실시간 데이터 검증 단계")
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
@@ -309,14 +313,27 @@ def live_panel():
         st.error(f"실시간 후보 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
 
     if st.session_state.get("market"):
-        t1, t2, t3 = st.tabs(["🛡️ 안정형 모의매매", "🚀 공격형 모의매매", "⚡ 스캘핑형 모의매매"])
+        t1, t2, t3, t4 = st.tabs(["🛡️ 안정형", "🚀 공격형", "⚡ 스캘핑형", "🎯 정밀 스캘핑형"])
         with t1:
             show_strategy("안정형")
         with t2:
             show_strategy("공격형")
         with t3:
-            st.warning("실험용 단기 전략입니다. 현재는 30초 간격 시세 갱신 기반이며 1분봉·체결강도·호가 잔량 기반 정밀 스캘핑은 아닙니다.")
             show_strategy("스캘핑형")
+        with t4:
+            show_strategy("정밀 스캘핑형")
+            from precision_scalping import get_precision_feed_state
+            feed = get_precision_feed_state()
+            st.subheader("NH 실시간 체결·호가 데이터 연결")
+            st.write(f"연결 상태: {feed['status']} · 추적 종목: {len(feed['codes'])}개")
+            a, b = st.columns(2)
+            a.metric("실시간 체결 수신", feed["trade_count"], feed["last_trade_at"] or "수신 대기")
+            b.metric("실시간 호가 수신", feed["book_count"], feed["last_book_at"] or "수신 대기")
+            if feed["last_error"]:
+                st.warning(feed["last_error"])
+            if feed["field_names"]:
+                st.caption("수신 확인된 데이터 필드: " + ", ".join(feed["field_names"]))
+            st.info("현재는 실시간 원본 데이터 수신·필드 검증 단계입니다. 1분봉·VWAP·EMA·RSI 및 호가 불균형 계산을 검증하기 전까지 정밀 스캘핑의 자동 매수·매도는 잠겨 있습니다.")
         try:
             save_state(st.session_state.portfolios, st.session_state.strategy_settings)
             st.caption("Paper accounts saved to database.")
@@ -329,8 +346,9 @@ with st.expander("두 전략의 비교 기준 및 주의사항"):
     st.markdown("""
     - **안정형:** 진입 기준을 높이고 현금 유보액과 손실 제한을 크게 두는 방식입니다.
     - **공격형:** 매수 기준을 낮추고 종목당 투자 한도·위험예산을 높여 기회를 더 적극적으로 탐색합니다.
-    - **스캘핑형:** 거래량·단기 모멘텀 조건을 엄격하게 적용하고 짧은 손절·트레일링 기준을 사용하는 실험용 전략입니다. 현재 30초 시세 갱신 기반입니다.
-    - 세 전략은 동일한 NH투자증권 실시간 시세를 기준으로 운용하지만 현금, 보유종목, 체결내역, 손익, 손실중지 상태가 완전히 분리된 가상계좌입니다.
+    - **스캘핑형:** 기존 30초 시세 갱신 기반 단기 전략입니다.
+    - **정밀 스캘핑형:** NH PLUG WebSocket 실시간 체결·호가 데이터를 수집하고 있습니다. 데이터 필드 검증 전에는 자동 매매를 실행하지 않습니다.
+    - 네 전략은 동일한 NH투자증권 시세 기반으로 운용하지만 현금, 보유종목, 체결내역, 손익, 손실중지 상태가 완전히 분리된 가상계좌입니다.
     - 매도는 고정 익절 대신 트레일링 스톱과 추세 이탈을 사용합니다.
     - 일일 손실 한도에 도달하면 해당 전략만 신규 매수를 중지합니다.
     - 실제 시세를 사용하더라도 체결은 가상으로 계산하며, 호가 차이·체결 지연·수수료·세금 등이 실제 시장과 달라 실전 수익률을 의미하지 않습니다.
