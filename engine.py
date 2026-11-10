@@ -30,6 +30,14 @@ STRATEGIES = {
         "min_trend": 0.2, "min_momentum": 0.3, "min_volume_ratio": 1.5,
         "max_risk": 0.55, "max_change_pct": 3.0,
     },
+    "정밀 스캘핑형": {
+        "max_position": 100000, "max_positions": 2, "cash_reserve": 100000,
+        "daily_loss_limit": 5000, "buy_threshold": 70,
+        "stop_loss_pct": 0.5, "trailing_activation_pct": 0.6,
+        "trailing_gap_pct": 0.3, "risk_budget_pct": 0.25,
+        "min_trend": 0.0, "min_momentum": 0.0, "min_volume_ratio": 1.2,
+        "max_risk": 0.6, "max_change_pct": 4.0,
+    },
 }
 
 def _new_portfolio():
