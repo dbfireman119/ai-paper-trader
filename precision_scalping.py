@@ -168,7 +168,7 @@ def get_precision_signal(code, now=None):
     total_volume = sum(volumes[-120:])
     vwap = (sum(p * v for p, v in zip(prices[-120:], volumes[-120:])) / total_volume
             if total_volume > 0 else statistics.fmean(prices[-30:]))
-    changes = [b - a for a, b in zip(prices[-16:-1], prices[-15:])]
+    changes = [b - a for a, b in zip(prices[-15:-1], prices[-14:])]
     gains = sum(max(x, 0) for x in changes) / 14
     losses = sum(max(-x, 0) for x in changes) / 14
     rsi = 100.0 if losses == 0 and gains > 0 else 50.0 if losses == 0 else 100 - 100 / (1 + gains / losses)
