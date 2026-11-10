@@ -31,7 +31,13 @@ if not site_username or not site_password:
 # The cookie contains no password; its signature prevents users from forging it.
 try:
     import extra_streamlit_components as stx
-    cookie_manager = stx.CookieManager(key="paper_trader_auth_cookie")
+    # Keep one manager instance per Streamlit session. Recreating the
+    # component on every rerun can race its browser-side cookie initialization.
+    if "paper_trader_cookie_manager" not in st.session_state:
+        st.session_state["paper_trader_cookie_manager"] = stx.CookieManager(
+            key="paper_trader_auth_cookie"
+        )
+    cookie_manager = st.session_state["paper_trader_cookie_manager"]
     auth_cookie_name = "paper_trader_session"
     session_secret = os.getenv("SITE_SESSION_SECRET", site_password).encode("utf-8")
 
@@ -50,11 +56,10 @@ try:
         except (TypeError, ValueError):
             return False
 
-    # CookieManager in extra-streamlit-components does not expose ready().
-    # Read the browser cookies directly; the component returns its value on
-    # the Streamlit rerun after the browser component has initialized.
+    # The constructor's getAll call populates cookies from the browser.
+    # Reuse that result instead of creating a second component instance/key.
     if not st.session_state.get("site_authenticated", False):
-        saved_cookies = cookie_manager.get_all() or {}
+        saved_cookies = cookie_manager.cookies or {}
         saved_token = saved_cookies.get(auth_cookie_name)
         if valid_session_token(saved_token):
             st.session_state.site_authenticated = True
@@ -74,10 +79,15 @@ if not st.session_state.get("site_authenticated", False):
             cookie_manager.set(
                 cookie=auth_cookie_name,
                 val=make_session_token(),
+                key="set_paper_trader_session",
+                path="/",
                 expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+                secure=True,
+                same_site="lax",
             )
+            # Do not force an immediate rerun: the component must first
+            # complete its browser-side cookie write.
             st.session_state.site_authenticated = True
-            st.rerun()
         else:
             st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
     st.stop()
