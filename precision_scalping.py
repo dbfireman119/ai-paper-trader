@@ -109,9 +109,10 @@ def _run_channel(codes, tr_cd, callback):
     while True:
         try:
             with _LOCK:
+                active_codes = list(_STATE["codes"]) or list(codes)
                 _STATE["status"] = "connecting"
                 _STATE["last_error"] = None
-            subscribe(codes, callback, tr_cd=tr_cd, timeout=30)
+            subscribe(active_codes, callback, tr_cd=tr_cd, timeout=30)
         except Exception as exc:
             with _LOCK:
                 _STATE["last_error"] = f"{tr_cd}: {exc}"
