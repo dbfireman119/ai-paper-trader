@@ -337,21 +337,31 @@ def live_panel():
             and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
-        # Precision strategy is enabled in paper-only validation mode. Its
-        # independent portfolio uses the existing live quote + scored-universe
-        # engine with tighter risk settings. Raw tick/orderbook indicators are
-        # still being validated before they become entry filters.
-        from precision_scalping import start_precision_feed, get_precision_feed_state
+        # Precision scalping uses per-symbol tick-derived EMA/VWAP/RSI and
+        # live order-book imbalance. Only fresh, fully parsed signals can enter.
+        from precision_scalping import (
+            start_precision_feed, get_precision_feed_state, get_precision_signal
+        )
         start_precision_feed(top20_codes)
         precision_feed = get_precision_feed_state()
+        precision_signals = {
+            str(code): get_precision_signal(str(code))
+            for code in top20_codes
+        }
+        precision_entries = [
+            row for _, row in scored.iterrows()
+            if precision_signals.get(str(row["code"]), {}).get("entry", False)
+            and precision_signals.get(str(row["code"]), {}).get("ready", False)
+        ]
+        precision_scored = pd.DataFrame(precision_entries, columns=scored.columns)
         if st.session_state.auto_trade and market_open:
             for strategy_name in ("안정형", "공격형", "스캘핑형"):
                 run_strategy(strategy_name, scored)
-            if precision_feed["trade_count"] > 0 and precision_feed["book_count"] > 0:
-                run_strategy("정밀 스캘핑형", scored)
-                st.success("4개 전략 모의매매 처리 완료 · 정밀 스캘핑은 실시간 체결·호가 수신 확인 후 검증 운용 중")
+            if not precision_scored.empty:
+                run_strategy("정밀 스캘핑형", precision_scored)
+                st.success(f"정밀 스캘핑 진입 후보 {len(precision_scored)}종목 · 실시간 체결/호가 조건 통과")
             else:
-                st.info("기존 3개 전략 모의매매 중 · 정밀 스캘핑은 체결·호가 데이터가 모두 들어오면 시작합니다.")
+                st.info("정밀 스캘핑 대기 · 신선한 체결 데이터 30건 이상과 EMA/VWAP/RSI/호가 불균형 조건을 모두 충족해야 진입합니다.")
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
@@ -387,7 +397,24 @@ def live_panel():
                 st.warning(feed["last_error"])
             if feed["field_names"]:
                 st.caption("수신 확인된 데이터 필드: " + ", ".join(feed["field_names"]))
-            st.info("정밀 스캘핑 모의계좌는 별도로 운용합니다. 현재 검증 운용은 실시간 시세·일봉 점수와 정밀 스캘핑 전용 위험설정을 사용하며, 실제 주문은 전혀 실행하지 않습니다. 1분봉·VWAP·EMA·RSI·호가 불균형을 실제 수신 필드에 맞춰 검증한 뒤 진입 필터에 추가합니다.")
+            signal_rows = []
+            for code in feed["codes"]:
+                sig = get_precision_signal(code)
+                if sig.get("ready"):
+                    signal_rows.append({
+                        "종목코드": code, "체결가": round(sig["price"], 2),
+                        "EMA9": round(sig["ema9"], 2), "EMA21": round(sig["ema21"], 2),
+                        "VWAP": round(sig["vwap"], 2), "RSI14": round(sig["rsi14"], 1),
+                        "호가불균형": round(sig["imbalance"], 3),
+                        "스프레드(%)": round(sig["spread_pct"], 3) if sig["spread_pct"] is not None else None,
+                        "최근변동(%)": round(sig["recent_return_pct"], 3),
+                        "진입판정": "진입 가능" if sig["entry"] else "대기",
+                    })
+            if signal_rows:
+                st.dataframe(pd.DataFrame(signal_rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("종목별 체결 30건·호가 필드가 모이면 EMA/VWAP/RSI/호가 불균형 지표가 표시됩니다.")
+            st.info("정밀 스캘핑 진입은 최근 체결 30건 이상, 체결·호가 데이터 20초 이내, EMA9>EMA21, 현재가>VWAP, RSI 50~70, 매수잔량 우위(10% 이상), 최근 단기 상승 및 스프레드 0.25% 이하를 모두 요구합니다. 손절·일일손실한도·보유종목 제한은 정밀 스캘핑 전용 설정을 따릅니다. 실제 주문은 실행하지 않습니다.")
         try:
             save_state(st.session_state.portfolios, st.session_state.strategy_settings)
             st.caption("Paper accounts saved to database.")
