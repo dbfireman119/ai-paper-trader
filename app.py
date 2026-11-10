@@ -31,13 +31,10 @@ if not site_username or not site_password:
 # The cookie contains no password; its signature prevents users from forging it.
 try:
     import extra_streamlit_components as stx
-    # Keep one manager instance per Streamlit session. Recreating the
-    # component on every rerun can race its browser-side cookie initialization.
-    if "paper_trader_cookie_manager" not in st.session_state:
-        st.session_state["paper_trader_cookie_manager"] = stx.CookieManager(
-            key="paper_trader_auth_cookie"
-        )
-    cookie_manager = st.session_state["paper_trader_cookie_manager"]
+    # Recreate the manager on each Streamlit run with the same component key.
+    # Its constructor reads the browser's current cookie response; caching the
+    # first empty result in session_state would keep it empty after page refresh.
+    cookie_manager = stx.CookieManager(key="paper_trader_auth_cookie")
     auth_cookie_name = "paper_trader_session"
     session_secret = os.getenv("SITE_SESSION_SECRET", site_password).encode("utf-8")
 
