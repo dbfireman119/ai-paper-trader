@@ -112,16 +112,29 @@ def show_strategy(name):
     with st.expander(f"{name} 세부 설정 조절", expanded=False):
         st.caption("이 설정은 해당 전략에만 적용됩니다. 초기값 복원은 설정값만 변경하며 보유 종목·거래 내역·가상 잔액은 초기화하지 않습니다.")
         if st.button(f"↩ {name} 설정을 처음값으로 복원", key=f"{name}_reset_settings", use_container_width=True):
-            st.session_state.strategy_settings[name] = dict(STRATEGIES[name])
-            widget_keys = [
-                f"{name}_threshold", f"{name}_max_positions", f"{name}_max_position",
-                f"{name}_min_trend", f"{name}_min_momentum", f"{name}_min_volume",
-                f"{name}_max_risk", f"{name}_max_change", f"{name}_reserve",
-                f"{name}_stop", f"{name}_trail_start", f"{name}_trail_gap",
-                f"{name}_risk_budget", f"{name}_daily_loss",
-            ]
-            for widget_key in widget_keys:
-                st.session_state.pop(widget_key, None)
+            defaults = dict(STRATEGIES[name])
+            st.session_state.strategy_settings[name] = defaults
+            # Streamlit widgets with explicit keys keep their own values in
+            # session_state. Update those keys directly; popping them can leave
+            # the browser-rendered controls showing the previous values.
+            widget_defaults = {
+                f"{name}_threshold": defaults["buy_threshold"],
+                f"{name}_max_positions": defaults["max_positions"],
+                f"{name}_max_position": defaults["max_position"],
+                f"{name}_min_trend": defaults["min_trend"],
+                f"{name}_min_momentum": defaults["min_momentum"],
+                f"{name}_min_volume": defaults["min_volume_ratio"],
+                f"{name}_max_risk": defaults["max_risk"],
+                f"{name}_max_change": defaults["max_change_pct"],
+                f"{name}_reserve": defaults["cash_reserve"],
+                f"{name}_stop": defaults["stop_loss_pct"],
+                f"{name}_trail_start": defaults["trailing_activation_pct"],
+                f"{name}_trail_gap": defaults["trailing_gap_pct"],
+                f"{name}_risk_budget": defaults["risk_budget_pct"],
+                f"{name}_daily_loss": defaults["daily_loss_limit"],
+            }
+            for widget_key, default_value in widget_defaults.items():
+                st.session_state[widget_key] = default_value
             try:
                 save_strategy_settings(st.session_state.strategy_settings)
             except Exception as exc:
