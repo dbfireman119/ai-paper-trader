@@ -1,6 +1,6 @@
 import os
 import hmac
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
@@ -26,6 +26,38 @@ if not site_username or not site_password:
     st.error("사이트 접근 설정이 완료되지 않았습니다. 관리자에게 문의하세요.")
     st.stop()
 
+# Streamlit session_state is recreated on a browser refresh. Keep a signed,
+# time-limited session token in the browser cookie so refresh does not log out.
+# The cookie contains no password; its signature prevents users from forging it.
+try:
+    import extra_streamlit_components as stx
+    cookie_manager = stx.CookieManager(key="paper_trader_auth_cookie")
+    auth_cookie_name = "paper_trader_session"
+    session_secret = os.getenv("SITE_SESSION_SECRET", site_password).encode("utf-8")
+
+    def make_session_token():
+        expires = int((datetime.now(timezone.utc) + timedelta(days=7)).timestamp())
+        payload = str(expires)
+        signature = hmac.new(session_secret, payload.encode("utf-8"), "sha256").hexdigest()
+        return f"{payload}.{signature}"
+
+    def valid_session_token(token):
+        try:
+            expires_text, supplied_signature = str(token).split(".", 1)
+            expires = int(expires_text)
+            expected = hmac.new(session_secret, expires_text.encode("utf-8"), "sha256").hexdigest()
+            return expires > int(datetime.now(timezone.utc).timestamp()) and hmac.compare_digest(supplied_signature, expected)
+        except (TypeError, ValueError):
+            return False
+
+    if not st.session_state.get("site_authenticated", False):
+        saved_token = cookie_manager.get(cookie=auth_cookie_name)
+        if valid_session_token(saved_token):
+            st.session_state.site_authenticated = True
+except Exception as exc:
+    st.error(f"로그인 유지 기능을 불러오지 못했습니다: {exc}")
+    st.stop()
+
 if not st.session_state.get("site_authenticated", False):
     st.title("🔒 비공개 모의매매 사이트")
     st.caption("접근 권한이 있는 사용자만 이용할 수 있습니다.")
@@ -35,6 +67,11 @@ if not st.session_state.get("site_authenticated", False):
         submitted = st.form_submit_button("로그인", use_container_width=True)
     if submitted:
         if hmac.compare_digest(entered_username, site_username) and hmac.compare_digest(entered_password, site_password):
+            cookie_manager.set(
+                cookie=auth_cookie_name,
+                val=make_session_token(),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+            )
             st.session_state.site_authenticated = True
             st.rerun()
         else:
@@ -47,7 +84,7 @@ if st.session_state.get('persistence_restored'):
 elif st.session_state.get('persistence_error'):
     st.warning('Database is not connected yet; this session is temporary.')
 st.title("📈 AI 모의매매 전략 비교")
-st.caption("NH투자증권 실제 국내주식 시세 기반 · 4개 독립 모의계좌 · 실제 주문 기능 없음")
+st.caption("NH투자증권 실제 국내주식 시세 기반 · 4개 독립 모의계좌 · 실제 주문 기능 없음 · 새로고침 시 로그인 유지")
 
 with st.sidebar:
     st.subheader("공통 운용")
