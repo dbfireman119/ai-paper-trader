@@ -50,8 +50,16 @@ try:
         except (TypeError, ValueError):
             return False
 
+    # CookieManager is a browser component. On a hard refresh its first
+    # Python pass can run before the browser has returned cookie values.
+    # Wait for component readiness instead of incorrectly showing the login form.
+    if not cookie_manager.ready():
+        st.info("로그인 상태를 확인하고 있습니다...")
+        st.stop()
+
     if not st.session_state.get("site_authenticated", False):
-        saved_token = cookie_manager.get(cookie=auth_cookie_name)
+        saved_cookies = cookie_manager.get_all() or {}
+        saved_token = saved_cookies.get(auth_cookie_name)
         if valid_session_token(saved_token):
             st.session_state.site_authenticated = True
 except Exception as exc:
@@ -92,7 +100,7 @@ with st.sidebar:
     st.toggle("4개 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
     if st.session_state.get("auto_trade_save_error"):
         st.warning(f"자동매매 설정 저장 실패: {st.session_state['auto_trade_save_error']}")
-    st.caption("켜면 안정형·공격형·스캘핑형이 독립 모의매매합니다. 정밀 스캘핑형은 실시간 데이터 수신 검증 후 별도 활성화합니다.")
+    st.caption("켜면 4개 전략이 각각 독립된 가상계좌로 모의매매합니다. 정밀 스캘핑형은 현재 실시간 수신을 확인한 뒤 검증용 모의매매를 수행합니다.")
     st.divider()
     st.subheader("전체 시장 스캔")
     scan_info = get_scan_state()
@@ -326,15 +334,21 @@ def live_panel():
             and (now.hour > 9 or (now.hour == 9 and now.minute >= 5))
             and (now.hour < 15 or (now.hour == 15 and now.minute < 20))
         )
-        # Precision strategy first collects genuine NH PLUG real-time trade and
-        # order-book messages. Do not simulate or trade until payload fields and
-        # candle construction have been validated against live messages.
+        # Precision strategy is enabled in paper-only validation mode. Its
+        # independent portfolio uses the existing live quote + scored-universe
+        # engine with tighter risk settings. Raw tick/orderbook indicators are
+        # still being validated before they become entry filters.
         from precision_scalping import start_precision_feed, get_precision_feed_state
         start_precision_feed(top20_codes)
+        precision_feed = get_precision_feed_state()
         if st.session_state.auto_trade and market_open:
             for strategy_name in ("안정형", "공격형", "스캘핑형"):
                 run_strategy(strategy_name, scored)
-            st.success("기존 3개 전략 가상 매매 처리 완료 · 정밀 스캘핑은 실시간 데이터 검증 단계")
+            if precision_feed["trade_count"] > 0 and precision_feed["book_count"] > 0:
+                run_strategy("정밀 스캘핑형", scored)
+                st.success("4개 전략 모의매매 처리 완료 · 정밀 스캘핑은 실시간 체결·호가 수신 확인 후 검증 운용 중")
+            else:
+                st.info("기존 3개 전략 모의매매 중 · 정밀 스캘핑은 체결·호가 데이터가 모두 들어오면 시작합니다.")
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
@@ -370,7 +384,7 @@ def live_panel():
                 st.warning(feed["last_error"])
             if feed["field_names"]:
                 st.caption("수신 확인된 데이터 필드: " + ", ".join(feed["field_names"]))
-            st.info("현재는 실시간 원본 데이터 수신·필드 검증 단계입니다. 1분봉·VWAP·EMA·RSI 및 호가 불균형 계산을 검증하기 전까지 정밀 스캘핑의 자동 매수·매도는 잠겨 있습니다.")
+            st.info("정밀 스캘핑 모의계좌는 별도로 운용합니다. 현재 검증 운용은 실시간 시세·일봉 점수와 정밀 스캘핑 전용 위험설정을 사용하며, 실제 주문은 전혀 실행하지 않습니다. 1분봉·VWAP·EMA·RSI·호가 불균형을 실제 수신 필드에 맞춰 검증한 뒤 진입 필터에 추가합니다.")
         try:
             save_state(st.session_state.portfolios, st.session_state.strategy_settings)
             st.caption("Paper accounts saved to database.")
