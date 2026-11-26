@@ -73,12 +73,15 @@ def main() -> None:
         print("Automatic paper trading is disabled in shared controls.")
         return
 
-    restored = load_state()
-    if not restored:
-        portfolios = {name: engine._new_portfolio() for name in engine.STRATEGIES}
-        settings = deepcopy(engine.STRATEGIES)
-        save_state(portfolios, settings)
-        restored = {"portfolios": portfolios, "strategy_settings": settings}
+    restored = load_state() or {}
+    # Migrate older persisted accounts without resetting existing balances/trades.
+    portfolios = {
+        **{name: engine._new_portfolio() for name in engine.STRATEGIES},
+        **restored.get("portfolios", {}),
+    }
+    settings = deepcopy(engine.STRATEGIES)
+    settings.update(restored.get("strategy_settings", {}))
+    restored = {"portfolios": portfolios, "strategy_settings": settings}
 
     market = get_market_for_today(now.date().isoformat())
     state = SimpleNamespace(
@@ -108,7 +111,12 @@ def main() -> None:
     if candidates.empty:
         print("No eligible top-20 candidates; positions still evaluated.")
     for strategy_name in engine.STRATEGIES:
-        engine.run_strategy(strategy_name, candidates)
+        if strategy_name == "AI 헤지펀드형":
+            from hedge_fund_strategy import evaluate_candidates
+            fund_candidates, _ = evaluate_candidates(candidates)
+            engine.run_strategy(strategy_name, fund_candidates)
+        else:
+            engine.run_strategy(strategy_name, candidates)
 
     save_portfolios(state.portfolios)
     for name, portfolio in state.portfolios.items():
