@@ -95,15 +95,15 @@ if st.session_state.get('persistence_restored'):
 elif st.session_state.get('persistence_error'):
     st.warning('Database is not connected yet; this session is temporary.')
 st.title("📈 AI 모의매매 전략 비교")
-st.caption("NH투자증권 실제 국내주식 시세 기반 · 4개 독립 모의계좌 · 실제 주문 기능 없음 · 새로고침 시 로그인 유지")
+st.caption("NH투자증권 실제 국내주식 시세 기반 · 5개 독립 모의계좌 · 실제 주문 기능 없음 · 새로고침 시 로그인 유지")
 
 with st.sidebar:
     st.subheader("공통 운용")
     st.metric("각 전략 초기 자금", "500,000원")
-    st.toggle("4개 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
+    st.toggle("5개 전략 자동 모의매매", key="auto_trade", on_change=persist_auto_trade_toggle)
     if st.session_state.get("auto_trade_save_error"):
         st.warning(f"자동매매 설정 저장 실패: {st.session_state['auto_trade_save_error']}")
-    st.caption("켜면 4개 전략이 각각 독립된 가상계좌로 모의매매합니다. 정밀 스캘핑형은 현재 실시간 수신을 확인한 뒤 검증용 모의매매를 수행합니다.")
+    st.caption("켜면 5개 전략이 각각 독립된 가상계좌로 모의매매합니다. 정밀 스캘핑형은 실시간 체결·호가를 확인하며, AI 헤지펀드형은 상승·하락·리스크 분석가의 규칙 기반 합의로 별도 종목을 선별합니다.")
     st.divider()
     st.subheader("전체 시장 스캔")
     scan_info = get_scan_state()
@@ -354,11 +354,14 @@ def live_panel():
             and precision_signals.get(str(row["code"]), {}).get("ready", False)
         ]
         precision_scored = pd.DataFrame(precision_entries, columns=scored.columns)
+        from hedge_fund_strategy import evaluate_candidates
+        hedge_fund_scored, hedge_fund_report = evaluate_candidates(scored)
         if st.session_state.auto_trade and market_open:
             for strategy_name in ("안정형", "공격형", "스캘핑형"):
                 run_strategy(strategy_name, scored)
             if not precision_scored.empty:
                 run_strategy("정밀 스캘핑형", precision_scored)
+            run_strategy("AI 헤지펀드형", hedge_fund_scored)
                 st.success(f"정밀 스캘핑 진입 후보 {len(precision_scored)}종목 · 실시간 체결/호가 조건 통과")
             else:
                 st.info("정밀 스캘핑 대기 · 신선한 체결 데이터 30건 이상과 EMA/VWAP/RSI/호가 불균형 조건을 모두 충족해야 진입합니다.")
@@ -367,7 +370,7 @@ def live_panel():
 
         st.success(f"전체 분석 {len(daily_market):,}종목 · 상위 200개 선별 · 실시간 추적 {len(live_quotes)}개 · 갱신 {now.strftime('%H:%M:%S')}")
         st.subheader("🏆 전체 시장 점수 상위 200개")
-        st.caption("순위는 전체 종목의 최근 일봉 지표로 산출합니다. 상위 20개 거래가능 종목만 실시간 현재가를 갱신해 두 전략의 가상매매 후보로 사용합니다.")
+        st.caption("순위는 전체 종목의 최근 일봉 지표로 산출합니다. 상위 20개 거래가능 종목을 실시간 추적하며, 각 전략은 독립 기준으로 모의매매 후보를 선별합니다.")
         display_cols = ["종목명", "시장", "현재가", "등락률(%)", "거래량비율", "AI점수", "거래가능", "매매검증"]
         st.dataframe(top200_scored[display_cols], use_container_width=True, hide_index=True, height=520)
         st.caption(f"분석 기준일: {max(q.get('history_date', '') for q in daily_market.values())} · 스캔 완료: {scan.get('finished_at', '')}")
@@ -377,13 +380,24 @@ def live_panel():
         st.error(f"실시간 후보 시세 수신 실패 — 안전을 위해 이번 주기 모의매매를 중지했습니다: {exc}")
 
     if st.session_state.get("market"):
-        t1, t2, t3, t4 = st.tabs(["🛡️ 안정형", "🚀 공격형", "⚡ 스캘핑형", "🎯 정밀 스캘핑형"])
+        t1, t2, t3, t4, t5 = st.tabs(["🛡️ 안정형", "🚀 공격형", "⚡ 스캘핑형", "🎯 정밀 스캘핑형", "🏦 AI 헤지펀드형"])
         with t1:
             show_strategy("안정형")
         with t2:
             show_strategy("공격형")
         with t3:
             show_strategy("스캘핑형")
+        with t5:
+            show_strategy("AI 헤지펀드형")
+            st.subheader("AI 리서치팀 합의 보고서")
+            st.caption("현재 단계는 LLM을 호출하지 않는 투명한 규칙 기반 에이전트 모형입니다. 재무제표·뉴스·투자심리 데이터는 연결되지 않았으며, 기술적 데이터만 사용합니다.")
+            from hedge_fund_strategy import evaluate_candidates
+            _, fund_report = evaluate_candidates(scored)
+            if not fund_report.empty:
+                fund_cols = ["종목명", "시장", "AI점수", "추세분석", "모멘텀분석", "유동성분석", "상승론점수", "하락론점수", "펀드합의점수", "리스크등급", "펀드매니저판정", "판단근거"]
+                st.dataframe(fund_report[fund_cols].head(20), use_container_width=True, hide_index=True)
+            else:
+                st.info("실시간 후보 데이터가 준비되면 분석 보고서가 표시됩니다.")
         with t4:
             show_strategy("정밀 스캘핑형")
             from precision_scalping import get_precision_feed_state
@@ -423,13 +437,14 @@ def live_panel():
 
 live_panel()
 
-with st.expander("두 전략의 비교 기준 및 주의사항"):
+with st.expander("5개 전략의 비교 기준 및 주의사항"):
     st.markdown("""
     - **안정형:** 진입 기준을 높이고 현금 유보액과 손실 제한을 크게 두는 방식입니다.
     - **공격형:** 매수 기준을 낮추고 종목당 투자 한도·위험예산을 높여 기회를 더 적극적으로 탐색합니다.
     - **스캘핑형:** 기존 30초 시세 갱신 기반 단기 전략입니다.
     - **정밀 스캘핑형:** NH PLUG 실시간 체결·호가에서 EMA9/21, 체결 VWAP, RSI(14), 호가잔량 불균형, 스프레드를 계산하고 모든 진입 조건을 충족한 종목만 별도 모의계좌에서 매수합니다.
-    - 네 전략은 동일한 NH투자증권 시세 기반으로 운용하지만 현금, 보유종목, 체결내역, 손익, 손실중지 상태가 완전히 분리된 가상계좌입니다.
+    - **AI 헤지펀드형:** 추세·모멘텀·유동성 분석가와 상승론·하락론 검토, 리스크 심사 및 최종 합의 점수로 후보를 선별하는 별도 모의계좌입니다. 현 단계는 LLM 기반이 아닌 규칙 기반 프로토타입입니다.
+    - 다섯 전략은 동일한 NH투자증권 시세 기반으로 운용하지만 현금, 보유종목, 체결내역, 손익, 손실중지 상태가 완전히 분리된 가상계좌입니다.
     - 매도는 고정 익절 대신 트레일링 스톱과 추세 이탈을 사용합니다.
     - 일일 손실 한도에 도달하면 해당 전략만 신규 매수를 중지합니다.
     - 실제 시세를 사용하더라도 체결은 가상으로 계산하며, 호가 차이·체결 지연·수수료·세금 등이 실제 시장과 달라 실전 수익률을 의미하지 않습니다.
