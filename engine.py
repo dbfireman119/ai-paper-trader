@@ -38,6 +38,14 @@ STRATEGIES = {
         "min_trend": 0.0, "min_momentum": 0.0, "min_volume_ratio": 1.2,
         "max_risk": 0.6, "max_change_pct": 4.0,
     },
+    "AI 헤지펀드형": {
+        "max_position": 100000, "max_positions": 3, "cash_reserve": 100000,
+        "daily_loss_limit": 7000, "buy_threshold": 65,
+        "stop_loss_pct": 1.0, "trailing_activation_pct": 1.2,
+        "trailing_gap_pct": 0.6, "risk_budget_pct": 0.35,
+        "min_trend": 0.1, "min_momentum": 0.1, "min_volume_ratio": 1.1,
+        "max_risk": 0.65, "max_change_pct": 3.5,
+    },
 }
 
 def _new_portfolio():
