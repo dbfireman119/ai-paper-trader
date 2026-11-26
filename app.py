@@ -361,10 +361,10 @@ def live_panel():
                 run_strategy(strategy_name, scored)
             if not precision_scored.empty:
                 run_strategy("정밀 스캘핑형", precision_scored)
-            run_strategy("AI 헤지펀드형", hedge_fund_scored)
                 st.success(f"정밀 스캘핑 진입 후보 {len(precision_scored)}종목 · 실시간 체결/호가 조건 통과")
             else:
                 st.info("정밀 스캘핑 대기 · 신선한 체결 데이터 30건 이상과 EMA/VWAP/RSI/호가 불균형 조건을 모두 충족해야 진입합니다.")
+            run_strategy("AI 헤지펀드형", hedge_fund_scored)
         elif st.session_state.auto_trade and not market_open:
             st.info("정규장 모의매매 가능 시간(평일 09:05~15:20)이 아닙니다.")
 
